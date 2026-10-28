@@ -1,13 +1,14 @@
 /**
- * Linux packaged host-core is built on Ubuntu 22.04 (glibc 2.35). Newer
- * glibc can load that binary; older distros fail with
+ * Linux packaged host-core is linked with cargo-zigbuild against glibc 2.28
+ * (`--target *-unknown-linux-gnu.2.28`), independent of the CI runner OS.
+ * Newer glibc can load that binary; older distros fail with
  * `version 'GLIBC_2.xx' not found`. Detect the floor before spawn so the
  * UI can name supported releases instead of looping restarts.
  */
 
-export const MIN_LINUX_GLIBC = { major: 2, minor: 35 } as const;
+export const MIN_LINUX_GLIBC = { major: 2, minor: 28 } as const;
 export const GLIBC_UNSUPPORTED_STATUS = "GLIBC_UNSUPPORTED";
-export const LINUX_GLIBC_DISTROS = "Ubuntu 22.04, Debian 12, Fedora 36+";
+export const LINUX_GLIBC_DISTROS = "Debian 10, Ubuntu 20.04, Debian 12, Fedora 36+";
 
 export type GlibcVersion = { major: number; minor: number };
 
@@ -15,10 +16,11 @@ export class GlibcUnsupportedError extends Error {
   readonly code = GLIBC_UNSUPPORTED_STATUS;
 
   constructor(found?: string) {
+    const floor = formatGlibcVersion(MIN_LINUX_GLIBC);
     super(
       found
-        ? `Linux builds need glibc 2.35 or newer (${LINUX_GLIBC_DISTROS}); this system has ${found}.`
-        : `Linux builds need glibc 2.35 or newer (${LINUX_GLIBC_DISTROS}).`,
+        ? `Linux builds need glibc ${floor} or newer (${LINUX_GLIBC_DISTROS}); this system has ${found}.`
+        : `Linux builds need glibc ${floor} or newer (${LINUX_GLIBC_DISTROS}).`,
     );
     this.name = "GlibcUnsupportedError";
   }
