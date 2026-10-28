@@ -77,7 +77,7 @@ test("release runners validate tags without a separate job barrier", () => {
 test("release preparation overlaps independent work and avoids duplicate builds", () => {
   assert.match(
     releaseWorkflowSource,
-    /cargo build --release --locked -p host-core &/,
+    /cargo zigbuild --release --locked -p host-core --target \$\{\{ matrix\.zig_target \}\}/,
   );
   assert.match(releaseWorkflowSource, /wait "\$host_build_pid"/);
   assert.match(
@@ -166,7 +166,7 @@ test("release workflow publishes the Linux ASAR beside installers", () => {
 test("the release matrix ships native Linux x64 and arm64 lanes", () => {
   assert.match(
     releaseWorkflowSource,
-    /name: Linux arm64[\s\S]*?os: ubuntu-22\.04-arm[\s\S]*?arch: arm64[\s\S]*?runner_arch: aarch64[\s\S]*?artifact: linux-arm64[\s\S]*?platform: linux[\s\S]*?dist: dist:linux/,
+    /name: Linux arm64[\s\S]*?os: ubuntu-24\.04-arm[\s\S]*?arch: arm64[\s\S]*?runner_arch: aarch64[\s\S]*?artifact: linux-arm64[\s\S]*?platform: linux[\s\S]*?dist: dist:linux/,
     "the arm64 lane runs on a native arm64 runner",
   );
   // A runner that is not the architecture it packages would pair one
@@ -174,6 +174,17 @@ test("the release matrix ships native Linux x64 and arm64 lanes", () => {
   assert.match(
     releaseWorkflowSource,
     /name: Verify native runner architecture[\s\S]*?if: matrix\.runner_arch/,
+  );
+  // The glibc floor is pinned by the cargo-zigbuild target suffix, not by
+  // the runner OS: dropping the .2.28 would silently regress the floor to
+  // the runner's glibc (2.39 on ubuntu-24.04) and break Debian 10.
+  assert.match(
+    releaseWorkflowSource,
+    /zig_target: x86_64-unknown-linux-gnu\.2\.28/,
+  );
+  assert.match(
+    releaseWorkflowSource,
+    /zig_target: aarch64-unknown-linux-gnu\.2\.28/,
   );
   // electron-builder already names each Linux lane's feed after its own
   // architecture (`latest-linux.yml` on x64, `latest-linux-arm64.yml` on
@@ -190,7 +201,7 @@ test("the release matrix ships native Linux x64 and arm64 lanes", () => {
   // lanes one for one.
   assert.match(
     releaseWorkflowSource,
-    /pi-host-bundle:[\s\S]*?- arch: x64[\s\S]*?os: ubuntu-22\.04[\s\S]*?- arch: arm64[\s\S]*?os: ubuntu-22\.04-arm/,
+    /pi-host-bundle:[\s\S]*?- arch: x64[\s\S]*?os: ubuntu-24\.04[\s\S]*?- arch: arm64[\s\S]*?os: ubuntu-24\.04-arm/,
   );
 });
 

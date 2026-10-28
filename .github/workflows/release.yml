@@ -4,19 +4,19 @@
 # The easiest way to cut a release:
 #
 #   node scripts/release.mjs 0.2.0 --tag   # bump versions + commit + create tag v0.2.0
-#   git push origin <branch> v0.2.0        # push → this workflow builds & publishes
+#   git push origin main v0.2.0        # push → this workflow builds & publishes
 #
 # Builds installers for every platform defined in the electron-builder config
 # (macOS dmg/zip arm64 and x64, Windows NSIS and portable ZIP x64, Linux
-# AppImage/deb/rpm x64 and arm64), each
-# with its native pi-desktop-host-core Rust sidecar. The Linux app.asar is also
-# exported as a system-Electron repackaging asset, and all outputs — with their
-# electron-updater latest*.yml feeds — are published to the GitHub Release
-# (D126/D285/D364/D603). macOS tag artifacts are Developer ID-signed, notarized, and
-# stapled before upload (D450 / ADR 0289).
+# AppImage/deb/rpm x64 and arm64), each with its native pi-desktop-host-core
+# Rust sidecar. The Linux app.asar is also exported as a system-Electron
+# repackaging asset, and all outputs — with their electron-updater
+# latest*.yml feeds — are published to the GitHub Release
+# (D126/D285/D364/D603). macOS tag artifacts are Developer ID-signed,
+# notarized, and stapled before upload (D450 / ADR 0289).
 #
-# It also builds the headless `pi-host` bundle for both Linux architectures the
-# desktop publishes and publishes each as
+# It also builds the headless `pi-host` bundle for both Linux architectures
+# the desktop publishes and publishes each as
 # pi-host-<version>-linux-<arch>.tar.gz plus a .sha256 sidecar. The desktop's
 # SSH bootstrap downloads that asset at the desktop's version and verifies the
 # published checksum before installing on the remote machine (rollout
@@ -113,28 +113,34 @@ jobs:
             platform: windows
             dist: dist:win
           - name: Linux x64
-            # Ubuntu 22.04 keeps host-core at glibc 2.35 so Ubuntu 22.04,
-            # Debian 12, and Fedora 36+ can load the binary. ubuntu-latest
-            # (24.04) would raise the floor to 2.39.
-            os: ubuntu-22.04
+            # host-core is compiled with cargo-zigbuild pinned to glibc 2.28
+            # (see the "Build host-core with zigbuild" step below), so the
+            # runner OS no longer determines the glibc floor: Debian 10,
+            # Ubuntu 20.04+, Debian 12, and Fedora 36+ can all load the
+            # binary.
+            os: ubuntu-24.04
             arch: x64
             runner_arch: x86_64
             artifact: linux-x64
             platform: linux
             feed: latest-linux.yml
             dist: dist:linux
+            zig_target: x86_64-unknown-linux-gnu.2.28
+            prebuilt_host: "1"
           - name: Linux arm64
             # GitHub's native arm64 runner packages the Electron app and the
-            # host-core sidecar at the same architecture; the `-arm` image
-            # keeps the glibc 2.35 floor the x64 lane documents
-            # (ubuntu-24.04-arm would raise it to 2.39).
-            os: ubuntu-22.04-arm
+            # host-core sidecar at the same architecture; the zigbuild pin
+            # keeps the same glibc 2.28 floor the x64 lane documents (the
+            # runner OS no longer influences the floor).
+            os: ubuntu-24.04-arm
             arch: arm64
             runner_arch: aarch64
             artifact: linux-arm64
             platform: linux
             feed: latest-linux-arm64.yml
             dist: dist:linux
+            zig_target: aarch64-unknown-linux-gnu.2.28
+            prebuilt_host: "1"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -197,10 +203,46 @@ jobs:
       - name: Prepare package inputs
         run: |
           set -euo pipefail
-          cargo build --release --locked -p host-core &
+          # host-core must load on glibc 2.28 systems (Debian 10), so link
+          # with cargo-zigbuild --target *-unknown-linux-gnu.2.28. zig cc
+          # substitutes glibc 2.28-era headers and symbol versions, so the
+          # runner OS glibc is irrelevant to the shipped floor. The build
+          # overlaps the pnpm workspace build below: they share no outputs.
+          if [[ -n '${{ matrix.zig_target }}' ]]; then
+            (
+              rustup target add "$(echo '${{ matrix.zig_target }}' | cut -d. -f1)"
+              ZIG_VERSION=0.17.0
+              zig_arch="$(uname -m)"
+              curl -fsSL \
+                "https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz" \
+                -o /tmp/zig.tar.xz
+              tar -xJf /tmp/zig.tar.xz -C /tmp
+              export PATH="/tmp/zig-${zig_arch}-linux-${ZIG_VERSION}:$PATH"
+              cargo install --locked cargo-zigbuild
+              cargo zigbuild --release --locked -p host-core --target ${{ matrix.zig_target }}
+              triple="$(echo '${{ matrix.zig_target }}' | cut -d. -f1)"
+              host_bin="target/${triple}/release/pi-desktop-host-core"
+              if [ ! -f "$host_bin" ]; then
+                echo "missing ${host_bin}:" >&2
+                ls -la "target/${triple}/release" >&2
+                exit 1
+              fi
+              mkdir -p target/release
+              cp "$host_bin" target/release/pi-desktop-host-core
+            ) &
+          else
+            cargo build --release --locked -p host-core &
+          fi
           host_build_pid=$!
           trap 'kill "$host_build_pid" 2>/dev/null || true' EXIT
 
+          if [[ -n '${{ matrix.zig_target }}' ]]; then
+            base="$(echo '${{ matrix.zig_target }}' | cut -d. -f1 | sed 's/-unknown-/-/')"
+            glibc="$(echo '${{ matrix.zig_target }}' | cut -s -d. -f2-)"
+            CC="zig cc -target ${base}.${glibc}"
+            CXX="zig c++ -target ${base}.${glibc}"
+            export CC CXX
+          fi
           pnpm install --frozen-lockfile
           pnpm --filter '@pi-desktop/desktop^...' --fail-if-no-match build
 
@@ -209,6 +251,8 @@ jobs:
 
       - name: Package installers (${{ matrix.dist }})
         if: matrix.platform != 'macos'
+        env:
+          prebuilt_host: ${{ matrix.prebuilt_host }}
         # The dist scripts pass --publish never themselves: electron-builder
         # must not self-publish on tag builds (no token; softprops owns it).
         # The explicit architecture keeps the package and native Rust sidecar
@@ -280,8 +324,8 @@ jobs:
           # leaking credentials, because both render their own command lines
           # through a password filter. `electron-builder` itself is deliberately
           # absent: builder-util's `executing` debug line prints every spawned
-          # command with only its own stem list redacted, and that list does not
-          # cover `security set-key-partition-list -k <p12 password>`. The
+          # command with only its own stem list redacted, and that list does
+          # not cover `security set-key-partition-list -k <password>`. The
           # watchdog redacts the secret values and any --password/-k argument on
           # top of that.
           DEBUG: "electron-osx-sign*,electron-notarize*"
@@ -419,11 +463,13 @@ jobs:
           # a bundle the desktop refuses to install is dead weight, and a target
           # the desktop offers without a bundle fails mid-download.
           - arch: x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             runner_arch: x86_64
+            zig_target: x86_64-unknown-linux-gnu.2.28
           - arch: arm64
-            os: ubuntu-22.04-arm
+            os: ubuntu-24.04-arm
             runner_arch: aarch64
+            zig_target: aarch64-unknown-linux-gnu.2.28
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -467,12 +513,46 @@ jobs:
       - name: Build inputs (host-core, workspace, sidecar bundle)
         run: |
           set -euo pipefail
-          # Ubuntu 22.04 keeps the host-core glibc floor at 2.35, matching the
-          # desktop Linux build so the bundled binary loads on the same distros.
-          cargo build --release --locked -p host-core &
+          # The pnpm workspace / Agent sidecar doesn't affect the glibc floor,
+          # so it stays on the runner's Node toolchain; host-core links with
+          # cargo-zigbuild against glibc 2.28, matching the desktop Linux
+          # build so the bundled binary loads on the same distros (Debian 10
+          # and newer). The two builds overlap: they share no outputs.
+          if [[ -n '${{ matrix.zig_target }}' ]]; then
+            (
+              rustup target add "$(echo '${{ matrix.zig_target }}' | cut -d. -f1)"
+              ZIG_VERSION=0.17.0
+              zig_arch="$(uname -m)"
+              curl -fsSL \
+                "https://ziglang.org/download/${ZIG_VERSION}/zig-${zig_arch}-linux-${ZIG_VERSION}.tar.xz" \
+                -o /tmp/zig.tar.xz
+              tar -xJf /tmp/zig.tar.xz -C /tmp
+              export PATH="/tmp/zig-${zig_arch}-linux-${ZIG_VERSION}:$PATH"
+              cargo install --locked cargo-zigbuild
+              cargo zigbuild --release --locked -p host-core --target ${{ matrix.zig_target }}
+              triple="$(echo '${{ matrix.zig_target }}' | cut -d. -f1)"
+              host_bin="target/${triple}/release/pi-desktop-host-core"
+              if [ ! -f "$host_bin" ]; then
+                echo "missing ${host_bin}:" >&2
+                ls -la "target/${triple}/release" >&2
+                exit 1
+              fi
+              mkdir -p target/release
+              cp "$host_bin" target/release/pi-desktop-host-core
+            ) &
+          else
+            cargo build --release --locked -p host-core &
+          fi
           host_build_pid=$!
           trap 'kill "$host_build_pid" 2>/dev/null || true' EXIT
 
+          if [[ -n '${{ matrix.zig_target }}' ]]; then
+            base="$(echo '${{ matrix.zig_target }}' | cut -d. -f1 | sed 's/-unknown-/-/')"
+            glibc="$(echo '${{ matrix.zig_target }}' | cut -s -d. -f2-)"
+            CC="zig cc -target ${base}.${glibc}"
+            CXX="zig c++ -target ${base}.${glibc}"
+            export CC CXX
+          fi
           pnpm install --frozen-lockfile
           pnpm build:js
           pnpm --filter @pi-desktop/agent-runtime bundle
@@ -543,6 +623,7 @@ jobs:
           feeds = paths.map do |path|
             YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
           end
+
           versions = feeds.map { |feed| feed.fetch("version") }.uniq
           abort "macOS updater feeds disagree on version" unless versions.length == 1
 
