@@ -108,6 +108,12 @@ pi.commands.register(def: {
 pi.commands.unregister(id: string): Promise<void>
 ```
 
+宿主按原值保存命令 ID，不会自动添加前缀。建议使用插件专属命名空间，避免 ID 冲突。
+插件可以更新自己注册的命令；若 ID 已由另一个已加载的插件占用，注册操作将以
+`CONFLICT` 错误拒绝。注销其他插件的命令将以 `PERMISSION_DENIED` 错误拒绝。
+注销不存在的 ID 会成功返回，不产生任何变更。禁用或卸载插件时，宿主会移除该插件的
+命令，并释放相应 ID。
+
 ### 输入框文本转换（`composer.transform`）
 
 插件可通过 `manifest.contributes.composerTransforms` 声明由用户主动触发的文本操作。
@@ -292,6 +298,7 @@ pi.workspace.get(): Promise<{
   name: string;
   projectId?: string;
   roots?: Array<{ path: string; name: string; primary: boolean }>;
+  remote?: { path: string; readOnly: true }; // 仅 SSH 项目，见下文
 } | null>
 
 pi.fs.readText(pathFromRoot: string): Promise<string>
@@ -305,7 +312,7 @@ pi.fs.readRange(
   length: number,
   grantId?: string,
 ): Promise<{ bytes: Uint8Array; totalSize: number }>
-pi.fs.readPreview(pathFromRoot: string): Promise<{
+pi.fs.readPreview(pathFromRoot: string, options?: { workspacePath: string }): Promise<{
   kind: "text" | "image" | "binary" | "tooLarge"
   content?: string     // UTF-8 when kind is "text"
   dataUrl?: string     // data URL when kind is "image"
@@ -316,7 +323,7 @@ pi.fs.openInBrowser(pathFromRoot: string): Promise<void>
 pi.fs.reveal(pathFromRoot: string): Promise<void>
 pi.fs.writeText(pathFromRoot: string, content: string): Promise<void>
 pi.fs.glob(pattern: string): Promise<string[]>
-pi.fs.list(pathFromRoot: string): Promise<Array<{
+pi.fs.list(pathFromRoot: string, options?: { workspacePath: string }): Promise<Array<{
   name: string;
   path: string;        // root-relative, usable directly with readText / list
   isDirectory: boolean;
@@ -336,6 +343,19 @@ pi.fs.requestDirectory(): Promise<{ path: string; name: string } | null>
 `fs.readPreview` 为一份已存在且可读取的文件做应用内预览分类。它与 `fs.readText`
 使用相同的 `fs.read` 检查，拒绝目录，并返回 `text`（上限 512 KiB）、`image`
 （上限 5 MiB，data URL）、`binary` 或 `tooLarge`。插件不会收到绝对路径。
+
+SSH 项目的 `workspace.get` 保留不透明的 `remote-project:` 身份，并新增
+`remote: { path, readOnly: true }`。`remote.path` 仅用于显示，不能交给本地文件系统。
+`fs.list` 与 `fs.readPreview` 经配对 owner Host 的可选 `workspacePluginFiles`
+能力读取；工作区根必须位于 Host 文件夹选择器的浏览根内，或精确匹配已在该 Host
+注册的规范项目根；Host 继续检查规范路径包含关系、受保护目录、凭据拒绝列表与插件
+声明的 scope。
+远程预览还返回真实 `mtimeMs`；其他文件通道仍限本地并明确拒绝远程身份。
+缺少能力返回 `HOST_VERSION_MISMATCH`，不会改读 Desktop 文件系统。
+
+可选 `workspacePath` 应为视图捕获的工作区身份，不匹配返回 `WORKSPACE_CHANGED`。
+包括未传新参数的旧调用在内，所有读取均在首次等待前捕获根；根、远程绑定或插件
+生命周期改变后丢弃过期结果。参见[决策](/adr/plugin-remote-workspace-reads)。
 
 `fs.openDefault` 使用操作系统默认关联应用打开一个已存在的文件。它与
 `fs.readText` 使用相同的 `fs.read` 根目录、符号链接、受保护路径、拒绝列表和范围检查；
@@ -1065,11 +1085,18 @@ type PluginApiError = {
  | "RATE_LIMITED" // a rolling window is exhausted (e.g. bus publishes)
  | "CONFIRMATION_REQUIRED" // a dangerous desktop operation without confirm: true
  | "INTERNAL"
+ | string // 见下文
  message: string
 }
 ```
 
-所有 API 失败都会引发携带 `code` 的错误。
+所有 API 失败都会引发携带 `code` 的错误。上面列出的是常见取值，不是封闭枚举：宿主
+会原样转发出错层设置的 code，没有 code 的错误到达插件时为 `PLUGIN_API_FAILED`。
+桌面宿主目前还会抛出 `INVALID_PARAMS`（session、usage、project、desktop API 的
+输入校验；其他 API 用 `INVALID_ARGUMENT`）、`UNAVAILABLE`（浏览器等宿主服务缺失）、
+`PLUGIN_UNLOADED`（调用期间插件被卸载或重载）、`CONFLICT`（speech 协议已被占用）、
+`PROVIDER_ERROR`（speech 适配器返回空结果）、`WORKSPACE_CHANGED`、`OPEN_FAILED`、
+`REVEAL_FAILED` 和 `CONNECT_FAILED`。只对自己处理的 code 分支，其余按通用失败处理。
 
 ## 5. 事件（主机 -> 插件）
 
@@ -1112,6 +1139,10 @@ pi.events.off(event, handler)
   一次 `pi.session.getActive()` 补齐。不需要权限，且其中回合 id 与
   `session:turnEnded` 报告的身份一致。
 
+- `net:websocket:open` / `net:websocket:message` / `net:websocket:close` /
+  `net:websocket:error` —— 只发给持有该 socket 的插件；见 §3 `net` 下的
+  `net.websocket`。
+
 抛出的处理程序会被记录下来，并且不会影响其他侦听器或插件。
 
 计划活动：无。
@@ -1130,6 +1161,27 @@ window.pluginBridge.on(event, handler)
 因此同一份 HTML 入口在两种放置方式下都能工作。差别只在于 chrome 与下面这个
 视图 `location`：停靠视图没有窗口控制胶囊、没有拖拽带，其
 `--pi-plugin-titlebar-height` 为 `0px` 而非 `46px`。
+
+停靠视图同时跟随宿主的文字大小。它不是应用文档，无法继承渲染器的
+`--font-scale`，因此宿主把「外观 → 字体大小」（D343 / ADR 0180）乘以窗口缩放，
+作为该页面的缩放因子，并在每个新文档上重新应用。在该因子下，插件内的一个 CSS
+像素与应用内的一个 CSS 像素绘制成同样的 DIP，因此作者原有尺寸的文字与控件在任何
+设置下都与周围面板保持比例——既不需要重载，也不要求插件改用宿主设计令牌。
+视图作者能观察到的两个后果：页面像素是缩放后页面自己的像素，所以回传给「由宿主
+摆放原生内容」的 API（`pi.browser` 的 `browser.setBounds`）的矩形由宿主换算；
+把布局钉在固定窗口尺寸上的页面需要自行缩放这些值。独立 `ui.panel` 窗口与浮动
+挂件保持自己的基础尺寸：它们是独立窗口，而不是合成进应用内的表面。
+
+### 6.1 浮动挂件
+
+清单可以声明 `"ui": { "shape": "widget" }`。面板随后会以浮动挂件打开：同一个沙盒化、权限门控的页面，位于透明、无边框窗口中，没有 46px 拖拽带、没有控制胶囊，也没有矩形原生阴影。页面拥有自己的整个矩形，通常绘制一个比矩形更小的轮廓——例如一个圆形球体——因此宿主不得在该轮廓周围绘制边框。
+
+- `--pi-plugin-titlebar-height` 为 `0px`，并且无论页面声明什么 chrome 标记，旧式的附加顶部偏移也不会应用。
+- 放置方式会在页面脚本运行前发布为 `document.documentElement.dataset.piPluginPanelShape`：`panel`、`widget` 或 `view`。
+- 拖拽使用整窗拖拽映射：空白区域移动窗口，而标准控件（`button`、`input`、`a`、`[tabindex]`、……）以及每个标记了 `data-pi-plugin-no-drag` 的元素保持可点击。
+- 挂件没有胶囊，因此宿主在表面自己的上下文菜单后面提供一个等效菜单：关闭、最小化、始终置顶。插件仍然可以通过 `ui.closePanel()` 关闭自己的挂件。
+- `ui.width` / `ui.height` 会一直被尊重到 120×120（面板的最小尺寸仍为 360×280）。`ui.alwaysOnTop` 会把挂件固定在其他窗口之上，`ui.resizable` 对挂件默认为 `false`，对面板默认为 `true`。
+- 其他一切不变：相同的 preload、相同的 `pluginBridge` 通道、相同的权限门、相同的会话分区和出口策略。
 
 停靠视图还可以被指定一个要展示的对象。工作面板选项卡本来就携带的 `location`
 会投递给任何贡献视图——不再只限 `pi.browser`（它的地址栏保留自己的导航通道）：
