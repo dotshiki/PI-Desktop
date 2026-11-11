@@ -2,9 +2,27 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const trEntries: ChangelogEntry[] = [
   {
+    version: "0.22.0",
+    date: "2026-11-08",
+    highlights: [
+      "Pi 1.5 aracı motorunu kullanın ve kullanım alanlarında tur ile oturum maliyetlerini inceleyin.",
+      "Daha güvenli bağlam sıkıştırma, görüntü işleme ve araç yürütmeyle uzun konuşmaları kararlı tutun.",
+      "Proje düzenini ve zamanlanmış görev düzenleyicilerini güvenilir biçimde kurtarın; MCP yapılandırmalarını seçili projeye kaydedin.",
+      "Açık izinler ve görünür imleçle bilgisayar kullanımı üzerinden masaüstü uygulamalarını aracıya kontrol ettirin.",
+      "Yüklü uygulamaları ve eklenti komutlarını tek, gruplandırılmış başlatıcıdan açın; sık kullandıklarınızı sabitleyin.",
+      "Tamamlanan etkinlikleri daraltın; eski geçmiş yüklenirken en yeni iletilere daha akıcı biçimde dönün.",
+      "Klasörleri Composer'a dizin referansları olarak yapıştırın ve dizin bağlantılarını doğrudan dosya yöneticisinde açın.",
+      "Yeniden tasarlanan iki panelli model seçicisinde model seçin ve sağlayıcı ayarlarına doğrudan geçin.",
+      "@agent etiketiyle bir istemi adlandırılmış bir alt ajana yönlendirin.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [
+      "Her turun ve tüm konuşmanın maliyetini bağlam denetçisinde ve tur kullanım kapsülünde görün; abonelik kullanımı kullandıkça öde harcamasından ayrı gösterilir.",
+      "Kendi videonuzu başlangıç animasyonu olarak kullanın: \"startup\" klasörüne bir video bırakın, oynatma bitince arayüz yavaşça belirir.",
+      "Eklentiler, etkin oturumu değiştirmeden kayıtlı projeleri ve klasörlerini listeleyebilir.",
       "Daha güvenli araç çağrısı doğrulaması ve geçmiş yeniden oynatımı için Pi 1.3.0 motoruna geçin.",
       "Konuşmalarda etkileşimli, korumalı kartlar görmek için Ayarlar → AI bölümünde isteğe bağlı satır içi görselleştirmeleri açın.",
       "Çalışma paneli gizliyken, başka oturum seçiliyken veya arayüz yenilenirken oturumun tarayıcı sayfaları kullanılabilir kalır.",

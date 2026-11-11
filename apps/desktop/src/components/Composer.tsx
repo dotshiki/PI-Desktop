@@ -25,6 +25,7 @@ import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
 import { composerModelDisplayName, sameComposerModelId } from "../lib/composer-models";
+import { sessionFastModeActive } from "../lib/fast-mode-command";
 import {
   resolveComposerThinkingProvider,
 } from "../lib/session-thinking";
@@ -129,8 +130,9 @@ export function Composer({
         providerModels,
         providers,
         sessionCompactions,
+        activeSessionSummary,
       ),
-    [liveMessages, providerModels, providers, sessionCompactions],
+    [liveMessages, providerModels, providers, sessionCompactions, activeSessionSummary],
   );
   const configureActiveSession = useAppStore((s) => s.configureActiveSession);
   const showToast = useAppStore((s) => s.showToast);
@@ -448,6 +450,8 @@ export function Composer({
     t,
     sendPrompt,
     steerPrompt,
+    sendQueuedNow,
+    queuedPrompts,
     showToast,
     recordHistory: inputHistory.record,
     draft: {
@@ -486,6 +490,7 @@ export function Composer({
     cursor,
     composing,
     enabled: !inputBlocked && localToolsAllowed,
+    agentsEnabled: mode === "agent",
     referenceSessionId,
     fileReferencesRef,
     applyEditorDraft,
@@ -577,6 +582,8 @@ export function Composer({
           ) : null}
           <ComposerInput
             imagePreview={draft.imagePreview}
+            directoryReferences={activeFileReferences.filter((reference) => reference.kind === "directory")}
+            onRemoveDirectory={draft.removeDirectoryReference}
             inputRef={ref}
             value={value}
             placeholderText={placeholderText}
@@ -591,9 +598,9 @@ export function Composer({
             onAcceptCompletion={completions.acceptCompletion}
             onSubmit={(steering) => void submitFromComposer(steering)}
             onInsertNewline={insertNewlineInEditor}
-            onInput={(source, caret) => {
+            onInput={(source, caret, composing) => {
               inputHistory.exitBrowsing();
-              completions.handleInput(source, caret);
+              completions.handleInput(source, caret, composing);
             }}
             onHistoryNavigate={inputHistory.navigate}
             onCompositionStart={() => setComposing(true)}
@@ -632,6 +639,7 @@ export function Composer({
             modelMenu={modelMenu}
             modelLabel={modelLabel}
             thinkingLabel={thinkingLabel}
+            modelFastMode={sessionFastModeActive(provider, modelId, activeSession ?? draftConfiguration)}
             contextUsage={composerContextUsage ?? null}
             value={value}
             modelReady={modelReady}

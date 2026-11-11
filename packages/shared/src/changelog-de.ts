@@ -2,9 +2,27 @@ import type { ChangelogEntry } from "./changelog.js";
 
 export const deEntries: ChangelogEntry[] = [
   {
+    version: "0.22.0",
+    date: "2026-11-08",
+    highlights: [
+      "Nutzen Sie die Pi-1.5-Agent-Engine und prüfen Sie Runden- und Sitzungskosten in den Nutzungsansichten.",
+      "Stabilere lange Gespräche durch sicherere Kontextkomprimierung, Bildverarbeitung und Werkzeugausführung.",
+      "Projektlayout und Editoren geplanter Aufgaben zuverlässig wiederherstellen und MCP-Konfigurationen im ausgewählten Projekt speichern.",
+      "Lassen Sie den Agenten Desktop-Apps über die Computersteuerung mit ausdrücklicher Freigabe und sichtbarem Cursor bedienen.",
+      "Starten Sie installierte Apps und Plugin-Befehle in einem gruppierten Launcher und heften Sie häufig genutzte Apps an.",
+      "Abgeschlossene Aktivitäten einklappen und beim Laden älterer Nachrichten flüssiger zu den neuesten zurückkehren.",
+      "Fügen Sie Ordner als Verzeichnisverweise in den Composer ein und öffnen Sie Verzeichnislinks direkt im Dateimanager.",
+      "Wählen Sie Modelle in einer überarbeiteten zweigeteilten Auswahl mit direktem Zugriff auf die Anbietereinstellungen.",
+      "Leiten Sie eine Anfrage mit einer @agent-Erwähnung an einen benannten Unteragenten weiter.",
+    ],
+  },
+  {
     version: "0.21.0",
     date: "2026-10-24",
     highlights: [
+      "Sieh im Kontextinspektor und in der Rundennutzungs-Kapsel, was jede Runde und die ganze Unterhaltung kostet; Abo-Nutzung wird getrennt von nutzungsbasierten Kosten gezeigt.",
+      "Eigenes Video als Startanimation verwenden: einfach eines in den Ordner „startup“ legen; danach wird die Oberfläche eingeblendet.",
+      "Plugins können gespeicherte Projekte und ihre Ordner auflisten, ohne die aktive Sitzung zu wechseln.",
       "Die Pi-1.3.0-Engine verbessert die Validierung von Tool-Aufrufen und die sichere Wiedergabe des Verlaufs.",
       "Optionale Inline-Visualisierungen unter Einstellungen → KI zeigen interaktive, isolierte Karten direkt im Gespräch.",
       "Browserseiten einer Sitzung bleiben bei verborgenem Arbeitsbereich, Sitzungswechsel und Neuladen der Oberfläche verfügbar.",
